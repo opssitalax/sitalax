@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Users, Calendar, Receipt, TrendingUp } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
     totalPatients: 0,
     todayAppointments: 0,
     pendingInvoices: 0,
-    revenue: 0
+    revenue: 0,
+    recentAppointments: [] as any[],
+    revenueChart: [] as any[]
   });
 
   useEffect(() => {
@@ -56,11 +59,60 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-xl bg-white shadow-sm border border-slate-200 p-6">
           <h2 className="text-lg font-medium text-slate-900 mb-4">Recent Appointments</h2>
-          <div className="text-sm text-slate-500">Loading appointments...</div>
+          {stats.recentAppointments && stats.recentAppointments.length > 0 ? (
+            <div className="flow-root">
+              <ul role="list" className="-my-5 divide-y divide-slate-200">
+                {stats.recentAppointments.map((apt: any) => (
+                  <li key={apt.id} className="py-4">
+                    <div className="flex items-center space-x-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-slate-900">{apt.patientName}</p>
+                        <p className="truncate text-sm text-slate-500">{apt.date} at {apt.time}</p>
+                      </div>
+                      <div>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                          apt.status === 'Completed' ? 'bg-green-100 text-green-800' :
+                          apt.status === 'Cancelled' ? 'bg-red-100 text-red-800' :
+                          'bg-blue-100 text-blue-800'
+                        }`}>
+                          {apt.status}
+                        </span>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="text-sm text-slate-500">No recent appointments found.</div>
+          )}
         </div>
         <div className="rounded-xl bg-white shadow-sm border border-slate-200 p-6">
-          <h2 className="text-lg font-medium text-slate-900 mb-4">Revenue Overview</h2>
-          <div className="text-sm text-slate-500">Loading chart...</div>
+          <h2 className="text-lg font-medium text-slate-900 mb-4">Revenue Overview (Last 7 Days)</h2>
+          {stats.revenueChart && stats.revenueChart.length > 0 ? (
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={stats.revenueChart} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} tickFormatter={(value) => `₹${value}`} />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    formatter={(value: number) => [`₹${value}`, 'Revenue']}
+                  />
+                  <Area type="monotone" dataKey="revenue" stroke="#8b5cf6" strokeWidth={2} fillOpacity={1} fill="url(#colorRevenue)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="text-sm text-slate-500">No revenue data available.</div>
+          )}
         </div>
       </div>
     </div>

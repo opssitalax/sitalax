@@ -178,12 +178,64 @@ if (!demoUser) {
 }
 
 // Seed initial data if empty
-const clinicCount = db.prepare('SELECT COUNT(*) as count FROM clinics').get() as { count: number };
-if (clinicCount.count === 0) {
-  // Fallback for other initial data if needed
-  const patientId = 'P101';
-  db.prepare('INSERT INTO patients (id, clinicId, name, phone, age, gender) VALUES (?, ?, ?, ?, ?, ?)').run(patientId, 'C101', 'Rahul Kumar', '9876543210', 30, 'Male');
-  db.prepare('INSERT INTO appointments (id, clinicId, doctorId, patientId, date, time, status) VALUES (?, ?, ?, ?, ?, ?, ?)').run('A101', 'C101', 'D101', patientId, new Date().toISOString().split('T')[0], '10:30', 'Confirmed');
+const patientCount = db.prepare('SELECT COUNT(*) as count FROM patients WHERE clinicId = ?').get('C101') as { count: number };
+if (patientCount.count <= 1) {
+  const clinicId = 'C101';
+  
+  // Clear existing dummy data to avoid conflicts
+  db.prepare('DELETE FROM invoices WHERE clinicId = ?').run(clinicId);
+  db.prepare('DELETE FROM appointments WHERE clinicId = ?').run(clinicId);
+  db.prepare('DELETE FROM patients WHERE clinicId = ?').run(clinicId);
+
+  const doctorId = 'D101';
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+  // Patients
+  const patients = [
+    { id: 'P101', name: 'Rahul Kumar', phone: '9876543210', age: 30, gender: 'Male', address: '123 MG Road, Bangalore' },
+    { id: 'P102', name: 'Priya Sharma', phone: '9876543211', age: 28, gender: 'Female', address: '456 Indiranagar, Bangalore' },
+    { id: 'P103', name: 'Amit Singh', phone: '9876543212', age: 45, gender: 'Male', address: '789 Koramangala, Bangalore' },
+    { id: 'P104', name: 'Sneha Gupta', phone: '9876543213', age: 35, gender: 'Female', address: '101 Whitefield, Bangalore' },
+    { id: 'P105', name: 'Vikram Patel', phone: '9876543214', age: 50, gender: 'Male', address: '202 Jayanagar, Bangalore' }
+  ];
+
+  const insertPatient = db.prepare('INSERT INTO patients (id, clinicId, name, phone, age, gender, address) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  patients.forEach(p => insertPatient.run(p.id, clinicId, p.name, p.phone, p.age, p.gender, p.address));
+
+  // Appointments
+  const appointments = [
+    { id: 'A101', patientId: 'P101', date: yesterdayStr, time: '10:00', status: 'Completed', source: 'Walk-in' },
+    { id: 'A102', patientId: 'P102', date: yesterdayStr, time: '11:30', status: 'Completed', source: 'Online' },
+    { id: 'A103', patientId: 'P103', date: todayStr, time: '09:00', status: 'Completed', source: 'Walk-in' },
+    { id: 'A104', patientId: 'P104', date: todayStr, time: '14:00', status: 'Booked', source: 'Online' },
+    { id: 'A105', patientId: 'P105', date: todayStr, time: '16:30', status: 'Booked', source: 'Walk-in' },
+    { id: 'A106', patientId: 'P101', date: tomorrowStr, time: '10:00', status: 'Booked', source: 'Online' }
+  ];
+
+  const insertAppointment = db.prepare('INSERT INTO appointments (id, clinicId, doctorId, patientId, date, time, status, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+  appointments.forEach(a => insertAppointment.run(a.id, clinicId, doctorId, a.patientId, a.date, a.time, a.status, a.source));
+
+  // Invoices
+  const invoices = [
+    { id: 'INV101', patientId: 'P101', appointmentId: 'A101', consultationFee: 500, procedureFee: 1500, medicineFee: 0, status: 'Paid' },
+    { id: 'INV102', patientId: 'P102', appointmentId: 'A102', consultationFee: 500, procedureFee: 0, medicineFee: 200, status: 'Paid' },
+    { id: 'INV103', patientId: 'P103', appointmentId: 'A103', consultationFee: 500, procedureFee: 3000, medicineFee: 500, status: 'Pending' }
+  ];
+
+  const insertInvoice = db.prepare('INSERT INTO invoices (id, clinicId, appointmentId, patientId, consultationFee, procedureFee, medicineFee, total, status, paymentMethod) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  invoices.forEach(i => {
+    const total = i.consultationFee + i.procedureFee + i.medicineFee;
+    insertInvoice.run(i.id, clinicId, i.appointmentId, i.patientId, i.consultationFee, i.procedureFee, i.medicineFee, total, i.status, i.status === 'Paid' ? 'UPI' : null);
+  });
 }
 
 // Public Booking API (No Auth Required)
@@ -769,11 +821,45 @@ apiRouter.get('/dashboard/stats', (req, res) => {
   const todayAppointments = db.prepare('SELECT COUNT(*) as count FROM appointments WHERE clinicId = ? AND date = ?').get(clinicId, today) as { count: number };
   const pendingInvoices = db.prepare('SELECT COUNT(*) as count FROM invoices WHERE clinicId = ? AND status = ?').get(clinicId, 'Pending') as { count: number };
   
+  const revenueResult = db.prepare('SELECT SUM(total) as revenue FROM invoices WHERE clinicId = ? AND status = ?').get(clinicId, 'Paid') as { revenue: number };
+  
+  // Recent Appointments
+  const recentAppointments = db.prepare(`
+    SELECT a.id, a.date, a.time, a.status, p.name as patientName
+    FROM appointments a
+    JOIN patients p ON a.patientId = p.id
+    WHERE a.clinicId = ? AND a.date >= ?
+    ORDER BY a.date ASC, a.time ASC
+    LIMIT 5
+  `).all(clinicId, today);
+
+  // Revenue Chart Data (Last 7 days)
+  const chartData = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    
+    const dayRevenue = db.prepare(`
+      SELECT SUM(i.total) as revenue 
+      FROM invoices i
+      JOIN appointments a ON i.appointmentId = a.id
+      WHERE i.clinicId = ? AND i.status = 'Paid' AND a.date = ?
+    `).get(clinicId, dateStr) as { revenue: number };
+    
+    chartData.push({
+      date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      revenue: dayRevenue.revenue || 0
+    });
+  }
+
   res.json({
     totalPatients: totalPatients.count,
     todayAppointments: todayAppointments.count,
     pendingInvoices: pendingInvoices.count,
-    revenue: 24500 // Mocked for now
+    revenue: revenueResult.revenue || 0,
+    recentAppointments,
+    revenueChart: chartData
   });
 });
 
